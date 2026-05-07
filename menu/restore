@@ -1,0 +1,193 @@
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BG_GREEN='\033[42;1m'
+NC='\033[0m'
+
+SPINNER=("⣷" "⣯" "⣟" "⡿" "⢿" "⣻" "⣽" "⣾")
+
+BACKUP_DIR="/root/zivpn_backups"
+GITHUB_TOKEN_FILE="/etc/zivpn/github_token"
+
+display_header() {
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╔═══════════════════════════════════════╗${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       🔄 RESTORE BACKUP               ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       Premium Edition                 ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╚═══════════════════════════════════════╝${BLUE}    │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+}
+
+show_loading() {
+    local text=$1
+    echo -ne "${CYAN}${text} ${NC}"
+    for i in {1..3}; do
+        for char in "${SPINNER[@]}"; do
+            echo -ne "\r${CYAN}${text} $char ${NC}"
+            sleep 0.1
+        done
+    done
+    echo -ne "\r${GREEN}${text} ✓ ${NC}"
+    echo
+}
+
+send_telegram_notification() {
+    local backup_id="$1"
+    
+    # Ambil informasi sistem
+    ISP=$(curl -s ipinfo.io/org | cut -d " " -f 2-10 2>/dev/null || echo "Unknown ISP")
+    IP=$(curl -sS ipv4.icanhazip.com 2>/dev/null || echo "Unknown IP")
+    
+    # Ambil domain dari berbagai lokasi
+    if [ -f "/etc/zivpn/domain" ]; then
+        DOMAIN=$(cat /etc/zivpn/domain 2>/dev/null)
+    elif [ -f "/etc/xray/domain" ]; then
+        DOMAIN=$(cat /etc/xray/domain 2>/dev/null)
+    else
+        DOMAIN="Not configured"
+    fi
+    
+    local bot_config="/etc/zivpn/bot-config.json"
+    
+    if [ ! -f "$bot_config" ]; then
+        return 1
+    fi
+    
+    local bot_token=$(grep -o '"bot_token": "[^"]*"' "$bot_config" | cut -d'"' -f4)
+    local admin_id=$(grep -o '"admin_id": [0-9]*' "$bot_config" | cut -d' ' -f2)
+    
+    if [ -z "$bot_token" ] || [ -z "$admin_id" ]; then
+        return 1
+    fi
+    
+    local datetime_now=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    local message="🔄 *RESTORE COMPLETED* 🔄
+━━━━━━━━━━━━━━━━━━━━
+🆔 *Backup ID:* \`$backup_id\`
+📅 *Date:* $datetime_now
+🌐 *Domain:* $DOMAIN
+🖧 *IP Address:* \`$IP\`
+🏢 *ISP:* $ISP
+━━━━━━━━━━━━━━━━━━━━
+✅ System has been restored from backup!"
+    
+    local url="https://api.telegram.org/bot${bot_token}/sendMessage"
+    curl -s -X POST "$url" -d "chat_id=${admin_id}" -d "text=${message}" -d "parse_mode=Markdown" >/dev/null
+}
+
+Restore_Backup() {
+    display_header
+    
+    echo -e "\n${BG_GREEN}${WHITE} RESTORE BACKUP ${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo
+    
+    echo -e "${CYAN}╭─ BACKUP ID ${NC}"
+    echo -e "${CYAN}╰────────────────────────────────────────────────${NC}"
+    echo -ne "${PURPLE}➤ Backup ID (15 karakter): ${NC}"
+    read backup_id
+    
+    if [[ -z "$backup_id" ]]; then
+        echo -e "\n${RED}❌ Backup ID harus diisi!${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    # Langsung download dari GitHub tanpa cek lokal
+    backup_file="${BACKUP_DIR}/${backup_id}.zip"
+    
+    echo -e "\n${YELLOW}📥 Mendownload backup dari GitHub...${NC}"
+    
+    github_token=$(cat $GITHUB_TOKEN_FILE 2>/dev/null)
+    if [ -z "$github_token" ]; then
+        echo -e "${RED}❌ GitHub token belum diatur! Silakan set token terlebih dahulu${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    show_loading "Downloading from GitHub"
+    wget -q "https://raw.githubusercontent.com/rifg67/zivpn-rifts/main/backup/${backup_id}.zip" -O "$backup_file"
+    
+    if [ ! -f "$backup_file" ] || [ ! -s "$backup_file" ]; then
+        echo -e "\n${RED}❌ Backup dengan ID '$backup_id' tidak ditemukan di GitHub!${NC}"
+        rm -f "$backup_file"
+        sleep 2
+        return 1
+    fi
+    echo -e "\n${GREEN}✅ Backup berhasil didownload dari GitHub${NC}"
+    
+    echo ""
+    show_loading "Stopping services"
+    systemctl stop zivpn 2>/dev/null
+    systemctl stop zivpn-api 2>/dev/null
+    systemctl stop zivpn-bot 2>/dev/null
+    
+    show_loading "Extracting backup"
+    unzip -o "$backup_file" -d /tmp/zivpn_restore/ 2>/dev/null
+    
+    show_loading "Restoring files"
+    
+    if [ -f "/tmp/zivpn_restore/config.json" ]; then
+        cp /tmp/zivpn_restore/config.json /etc/zivpn/config.json
+        echo -e "   ${GREEN}✓${NC} config.json restored"
+    fi
+    
+    if [ -f "/tmp/zivpn_restore/users.json" ]; then
+        cp /tmp/zivpn_restore/users.json /etc/zivpn/users.json
+        echo -e "   ${GREEN}✓${NC} users.json restored"
+    fi
+    
+    if [ -f "/tmp/zivpn_restore/apikey" ]; then
+        cp /tmp/zivpn_restore/apikey /etc/zivpn/apikey
+        echo -e "   ${GREEN}✓${NC} apikey restored"
+    fi
+    
+    if [ -f "/tmp/zivpn_restore/domain" ]; then
+        cp /tmp/zivpn_restore/domain /etc/zivpn/domain
+        echo -e "   ${GREEN}✓${NC} domain restored"
+    fi
+    
+    if [ -f "/tmp/zivpn_restore/bot-config.json" ]; then
+        cp /tmp/zivpn_restore/bot-config.json /etc/zivpn/bot-config.json
+        echo -e "   ${GREEN}✓${NC} bot-config.json restored"
+    fi
+    
+    rm -rf /tmp/zivpn_restore
+    
+    show_loading "Restarting services"
+    systemctl daemon-reload
+    systemctl restart zivpn 2>/dev/null
+    systemctl restart zivpn-api 2>/dev/null
+    
+    if systemctl is-active --quiet zivpn-bot 2>/dev/null; then
+        systemctl restart zivpn-bot 2>/dev/null
+    fi
+    
+    show_loading "Sending Telegram notification"
+    send_telegram_notification "$backup_id"
+    
+    clear
+    
+    echo -e "\n${GREEN}✅ Restore completed successfully!${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}Restored from    ${WHITE}: ${GREEN}$backup_id${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    
+    echo -e "\n${BLUE}─────────────────────────────────────────────────${NC}"
+    echo -e "${PURPLE}              Script By PeyxDev${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    
+    echo -e "\n${CYAN}Press Enter to continue...${NC}"
+    read -n 1 -s
+}
+
+Restore_Backup

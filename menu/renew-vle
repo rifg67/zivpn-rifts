@@ -1,0 +1,265 @@
+#!/bin/bash
+
+# Color Definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+# ==================== BOT CONFIGURATION (DARI /etc/zivpn/bot-config.json) ====================
+BOT_CONFIG="/etc/zivpn/bot-config.json"
+
+get_bot_config() {
+    if [ -f "$BOT_CONFIG" ]; then
+        KEY=$(grep -o '"bot_token": "[^"]*"' "$BOT_CONFIG" | cut -d'"' -f4)
+        CHATIDS=$(grep -o '"admin_id": [0-9]*' "$BOT_CONFIG" | cut -d' ' -f2)
+        echo "$KEY|$CHATIDS"
+    else
+        echo "|"
+    fi
+}
+
+BOT_INFO=$(get_bot_config)
+KEY=$(echo "$BOT_INFO" | cut -d'|' -f1)
+CHATIDS=$(echo "$BOT_INFO" | cut -d'|' -f2)
+TIME="10"
+URL="https://api.telegram.org/bot$KEY/sendMessage"
+
+# Transaction bot (gunakan bot yang sama)
+KEY2="$KEY"
+CHATID2="$CHATIDS"
+URL2="https://api.telegram.org/bot$KEY2/sendMessage"
+
+# Animation Characters
+SPINNER=("⣷" "⣯" "⣟" "⡿" "⢿" "⣻" "⣽" "⣾")
+
+nama=$(cat /etc/zivpn/username 2>/dev/null || echo "PEYX TUNNEL")
+
+# Function to send Telegram notification
+send_telegram_notification() {
+    local message="$1"
+    local is_transaction="$2"
+    
+    local target_chatid="$CHATIDS"
+    local target_url="$URL"
+    
+    if [ "$is_transaction" = "true" ]; then
+        target_chatid="$CHATID2"
+        target_url="$URL2"
+    fi
+    
+    if [ -n "$target_chatid" ] && [ -n "$KEY" ]; then
+        curl -s --max-time "$TIME" -X POST "$target_url" \
+            -d "chat_id=${target_chatid}" \
+            -d "disable_web_page_preview=1" \
+            -d "parse_mode=html" \
+            --data-urlencode "text=${message}" >/dev/null
+    fi
+}
+
+# Spinner function
+spinner() {
+    local pid=$!
+    local delay=0.1
+    local i=0
+    while kill -0 $pid 2>/dev/null; do
+        printf "\r${BLUE}┌─────────────────────────────────────────────────┐${NC}\n"
+        printf "\r${BLUE}│${YELLOW}           ${SPINNER[$i]} PROCESSING RENEWAL${BLUE}${NC}\n"
+        printf "\r${BLUE}└─────────────────────────────────────────────────┘${NC}"
+        i=$(( (i+1) % ${#SPINNER[@]} ))
+        sleep $delay
+    done
+    printf "\r\033[K"
+}
+
+clear
+echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+echo -e "${BLUE}│${YELLOW}        ╔═══════════════════════════╗${BLUE}            │${NC}"
+echo -e "${BLUE}│${YELLOW}        ║     🔄 RENEW VLESS        ║${BLUE}            │${NC}"
+echo -e "${BLUE}│${YELLOW}        ║       Premium Edition     ║${BLUE}            │${NC}"
+echo -e "${BLUE}│${YELLOW}        ╚═══════════════════════════╝${BLUE}            │${NC}"
+echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+echo
+
+# Count unique Vless users from database
+NUMBER_OF_CLIENTS=$(grep "^###" /etc/peyx/vless.db 2>/dev/null | wc -l)
+
+if [[ ${NUMBER_OF_CLIENTS} == '0' ]]; then
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${RED}            NO VLESS CLIENTS FOUND${BLUE}${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+    echo -e "${CYAN}Press any key to back on menu${NC}"
+    read -n 1 -s
+    menu
+fi
+
+echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+echo -e "${BLUE}│${WHITE}             📊 VLESS ACCOUNT LIST${BLUE}               │${NC}"
+echo -e "${BLUE}├─────────────────────────────────────────────────┤${NC}"
+echo -e "${BLUE}│${WHITE}  USERNAME         EXP DATE         STATUS${BLUE}       │${NC}"
+echo -e "${BLUE}├─────────────────────────────────────────────────┤${NC}"
+
+# Display Vless users from database
+while IFS= read -r line; do
+    if [[ "$line" =~ ^### ]]; then
+        username=$(echo "$line" | awk '{print $2}')
+        exp_date=$(echo "$line" | awk '{print $3}')
+        if [ ! -z "$username" ] && [ ! -z "$exp_date" ]; then
+            printf "${BLUE}│${WHITE}  %-15s %-15s ${GREEN}%-10s${WHITE}     ${BLUE}│${NC}\n" "$username" "$exp_date" "ACTIVE"
+        fi
+    fi
+done < /etc/peyx/vless.db
+
+echo -e "${BLUE}├─────────────────────────────────────────────────┤${NC}"
+printf "${BLUE}│${WHITE} %-16s: ${GREEN}%-26s${BLUE}    │${NC}\n" "Total Accounts" "$NUMBER_OF_CLIENTS users"
+echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+echo
+
+echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+echo -e "${BLUE}│${WHITE}            🔄 RENEW VLESS ACCOUNT${BLUE}${NC}"
+echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+echo
+read -p "   Username : " user
+
+if [ -z "$user" ]; then
+    menu
+else
+    # Get old expiry date from database
+    OLD_EXPIRE=$(grep "^### $user " /etc/peyx/vless.db 2>/dev/null | awk '{print $3}')
+    
+    # Get existing quota and IP limit from database
+    EXISTING_QUOTA=$(grep "^### $user " /etc/peyx/vless.db 2>/dev/null | awk '{print $4}')
+    EXISTING_IPLIMIT=$(grep "^### $user " /etc/peyx/vless.db 2>/dev/null | awk '{print $5}')
+    
+    # Remove old limit files
+    rm -f /etc/peyx/limit/vless/ip/${user} 2>/dev/null
+    rm -f /etc/peyx/vless/$user 2>/dev/null
+
+    echo
+    read -p "   Expired (days) : " masaaktif
+    read -p "   Quota (GB)     : " Quota
+    read -p "   Limit IP       : " iplim
+    
+    # Use existing values if input is empty
+    if [[ -z "$Quota" ]]; then
+        Quota="$EXISTING_QUOTA"
+    fi
+    if [[ -z "$iplim" ]]; then
+        iplim="$EXISTING_IPLIMIT"
+    fi
+    if [[ -z "$Quota" ]]; then
+        Quota="0"
+    fi
+    if [[ -z "$iplim" ]]; then
+        iplim="0"
+    fi
+    
+    # Calculate new expiration date
+    if [[ -z "$OLD_EXPIRE" ]] || [[ "$OLD_EXPIRE" == "never" ]]; then
+        NEW_EXPIRE=$(date -d "$masaaktif days" +"%Y-%m-%d")
+    else
+        NEW_EXPIRE=$(date -d "$OLD_EXPIRE + $masaaktif days" +"%Y-%m-%d")
+    fi
+    
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}           ⏳ PROCESSING RENEWAL${BLUE}${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+    
+    # Start the renewal process in background
+    (
+    # Update IP limit
+    mkdir -p /etc/peyx/limit/vless/ip
+    echo ${iplim} > /etc/peyx/limit/vless/ip/${user}
+    
+    # Update quota
+    mkdir -p /etc/peyx/vless
+    if [[ ${Quota} != "0" ]]; then
+        c=$(echo "${Quota}" | sed 's/[^0-9]*//g')
+        d=$((${c} * 1024 * 1024 * 1024))
+        echo "${d}" >/etc/peyx/vless/${user}
+    fi
+    
+    # Update database
+    sed -i "/^### $user /c\### $user $NEW_EXPIRE $Quota $iplim" /etc/peyx/vless.db 2>/dev/null
+    
+    # Note: Xray config tidak perlu diubah karena user sudah ada
+    # Hanya perlu restart Xray
+    systemctl restart xray > /dev/null 2>&1
+    ) &
+    
+    # Show spinner while processing
+    spinner $!
+    
+    # Format display date
+    NEW_EXPIRE_DISPLAY=$(date -d "$NEW_EXPIRE" '+%d %b %Y')
+    if [[ -z "$OLD_EXPIRE" ]] || [[ "$OLD_EXPIRE" == "never" ]]; then
+        OLD_EXPIRE_DISPLAY="never"
+    else
+        OLD_EXPIRE_DISPLAY=$(date -d "$OLD_EXPIRE" '+%d %b %Y' 2>/dev/null)
+    fi
+    
+    # Send notification to Telegram
+    TEXT="
+<code>------------------------------</code>
+<b>🔄 RENEW VLESS ACCOUNT</b>
+<code>------------------------------</code>
+<code>Username    : $user</code>
+<code>Limit IP    : $iplim Device</code>
+<code>Quota       : $Quota GB</code>
+<code>------------------------------</code>
+<code>Exp Lama : $OLD_EXPIRE_DISPLAY</code>
+<code>Exp Baru : $NEW_EXPIRE_DISPLAY</code>
+<code>------------------------------</code>"
+
+    send_telegram_notification "$TEXT" "false"
+
+    # Transaction notification
+    TEXT2="
+<b>-----------------------------------------</b>
+   <b>🔄 RENEW VLESS ACCOUNT</b>
+<b>-----------------------------------------</b>
+<b>Status : BERHASIL ✅</b>
+<b>User : ${user}</b>
+<b>Limit IP : ${iplim} Device</b>
+<b>Quota : ${Quota} GB</b>
+<b>Extend : ${masaaktif} Hari</b>
+<b>Exp Lama : ${OLD_EXPIRE_DISPLAY}</b>
+<b>Exp Baru : ${NEW_EXPIRE_DISPLAY}</b>
+<b>-----------------------------------------</b>
+<i>Automatic Notification From Server...</i>"
+    
+    send_telegram_notification "$TEXT2" "true"
+    
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${GREEN}        ╔═══════════════════════════╗${BLUE}            │${NC}"
+    echo -e "${BLUE}│${GREEN}        ║   ✅ RENEW SUCCESSFUL     ║${BLUE}            │${NC}"
+    echo -e "${BLUE}│${GREEN}        ║       VLESS ACCOUNT       ║${BLUE}            │${NC}"
+    echo -e "${BLUE}│${GREEN}        ╚═══════════════════════════╝${BLUE}            │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${WHITE}   Client Name : ${GREEN}$user${BLUE}${NC}"
+    echo -e "${BLUE}│${WHITE}   Limit IP    : ${GREEN}$iplim${BLUE}${NC}"
+    echo -e "${BLUE}│${WHITE}   Quota       : ${GREEN}$Quota GB${BLUE}${NC}"
+    echo -e "${BLUE}│${WHITE}   Expired On  : ${GREEN}$NEW_EXPIRE_DISPLAY${BLUE}${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${PURPLE}          Terimakasih Telah Menggunakan${BLUE}          │${NC}"
+    echo -e "${BLUE}│${PURPLE}                  Script Credit${BLUE}                  │${NC}"
+    echo -e "${BLUE}│${PURPLE}                     $nama${BLUE}                     │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+    echo -e "${CYAN}Press any key to back on menu${NC}"
+    read -n 1 -s
+    menu
+fi

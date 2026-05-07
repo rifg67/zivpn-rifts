@@ -1,0 +1,60 @@
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+clear
+echo -e "${BLUE}════════════════════════════════════════${NC}"
+echo -e "${GREEN}         SERVICE STATUS${NC}"
+echo -e "${BLUE}════════════════════════════════════════${NC}"
+echo ""
+
+# XRAY
+echo -ne "Xray    : "
+if systemctl is-active --quiet xray; then
+    echo -e "${GREEN}✅ Running${NC}"
+else
+    echo -e "${RED}❌ Stopped${NC}"
+fi
+
+# NGINX
+echo -ne "Nginx   : "
+if systemctl is-active --quiet nginx; then
+    echo -e "${GREEN}✅ Running${NC}"
+else
+    echo -e "${RED}❌ Stopped${NC}"
+fi
+
+# ZIVPN CORE
+echo -ne "ZiVPN   : "
+if systemctl is-active --quiet zivpn; then
+    echo -e "${GREEN}✅ Running${NC}"
+else
+    echo -e "${RED}❌ Stopped${NC}"
+fi
+
+# ZIVPN API
+echo -ne "API     : "
+if systemctl is-active --quiet zivpn-api-js 2>/dev/null; then
+    echo -e "${GREEN}✅ Running${NC}"
+else
+    echo -e "${RED}❌ Stopped${NC}"
+fi
+
+# ZIVPN BOT
+echo -ne "Bot     : "
+if systemctl is-active --quiet zivpn-bot 2>/dev/null; then
+    echo -e "${GREEN}✅ Running${NC}"
+else
+    echo -e "${RED}❌ Stopped${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}════════════════════════════════════════${NC}"
+echo -e "${CYAN}Press Enter to continue...${NC}"
+read -n 1 -s

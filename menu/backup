@@ -1,0 +1,218 @@
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BG_GREEN='\033[42;1m'
+NC='\033[0m'
+
+SPINNER=("⣷" "⣯" "⣟" "⡿" "⢿" "⣻" "⣽" "⣾")
+
+BACKUP_DIR="/root/zivpn_backups"
+GITHUB_TOKEN_FILE="/etc/zivpn/github_token"
+
+display_header() {
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╔═══════════════════════════════════════╗${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       💾 BACKUP & UPLOAD              ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       Premium Edition                 ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╚═══════════════════════════════════════╝${BLUE}    │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+}
+
+show_loading() {
+    local text=$1
+    echo -ne "${CYAN}${text} ${NC}"
+    for i in {1..3}; do
+        for char in "${SPINNER[@]}"; do
+            echo -ne "\r${CYAN}${text} $char ${NC}"
+            sleep 0.1
+        done
+    done
+    echo -ne "\r${GREEN}${text} ✓ ${NC}"
+    echo
+}
+
+generate_random_id() {
+    echo $(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 15 | head -n 1)
+}
+
+upload_to_github() {
+    local backup_id="$1"
+    local backup_file="$2"
+    
+    local github_token=$(cat $GITHUB_TOKEN_FILE 2>/dev/null)
+    if [ -z "$github_token" ]; then
+        echo -e "   ${YELLOW}⚠ GitHub token belum diatur, backup hanya disimpan lokal${NC}"
+        return 1
+    fi
+    
+    echo -e "   ${YELLOW}Uploading to GitHub...${NC}"
+    
+    local file_content_base64=$(base64 -w 0 "$backup_file")
+    
+    local json_payload=$(cat <<EOF
+{
+  "message": "Upload backup ${backup_id}",
+  "content": "${file_content_base64}"
+}
+EOF
+)
+    
+    local response=$(curl -s -X PUT \
+        -H "Authorization: token $github_token" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -d "$json_payload" \
+        "https://api.github.com/repos/rifg67/zivpn-rifts/contents/backup/${backup_id}.zip")
+    
+    if echo "$response" | grep -q '"content":'; then
+        echo -e "   ${GREEN}✅ Uploaded to GitHub successfully!${NC}"
+        return 0
+    else
+        echo -e "   ${RED}✗ Failed to upload to GitHub${NC}"
+        return 1
+    fi
+}
+
+send_telegram_notification() {
+    local backup_id="$1"
+    
+    # Ambil informasi sistem
+    ISP=$(curl -s ipinfo.io/org | cut -d " " -f 2-10 2>/dev/null || echo "Unknown ISP")
+    IP=$(curl -sS ipv4.icanhazip.com 2>/dev/null || echo "Unknown IP")
+    
+    # Ambil domain dari berbagai lokasi
+    if [ -f "/etc/zivpn/domain" ]; then
+        DOMAIN=$(cat /etc/zivpn/domain 2>/dev/null)
+    elif [ -f "/etc/xray/domain" ]; then
+        DOMAIN=$(cat /etc/xray/domain 2>/dev/null)
+    else
+        DOMAIN="Not configured"
+    fi
+    
+    local bot_config="/etc/zivpn/bot-config.json"
+    
+    if [ ! -f "$bot_config" ]; then
+        return 1
+    fi
+    
+    local bot_token=$(grep -o '"bot_token": "[^"]*"' "$bot_config" | cut -d'"' -f4)
+    local admin_id=$(grep -o '"admin_id": [0-9]*' "$bot_config" | cut -d' ' -f2)
+    
+    if [ -z "$bot_token" ] || [ -z "$admin_id" ]; then
+        return 1
+    fi
+    
+    local datetime_now=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    local message="💾 *BACKUP CREATED AND UPLOADED* 💾
+━━━━━━━━━━━━━━━━━━━━
+🆔 *Backup ID:* \`$backup_id\`
+📅 *Date:* $datetime_now
+🌐 *Domain:* $DOMAIN
+🖧 *IP Address:* \`$IP\`
+🏢 *ISP:* $ISP
+━━━━━━━━━━━━━━━━━━━━
+✅ Backup has been created and uploaded successfully!"
+    
+    local url="https://api.telegram.org/bot${bot_token}/sendMessage"
+    curl -s -X POST "$url" -d "chat_id=${admin_id}" -d "text=${message}" -d "parse_mode=Markdown" >/dev/null
+}
+
+Create_Backup() {
+    display_header
+    
+    echo -e "\n${BG_GREEN}${WHITE} BACKUP & UPLOAD ${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo
+    
+    mkdir -p "$BACKUP_DIR"
+    
+    backup_id=$(generate_random_id)
+    backup_file="${BACKUP_DIR}/${backup_id}.zip"
+    
+    echo -e "${CYAN}╭─ BACKUP INFORMATION ${NC}"
+    echo -e "${CYAN}╰────────────────────────────────────────────────${NC}"
+    echo -e "${WHITE}Backup ID       ${WHITE}: ${GREEN}$backup_id${NC}"
+    echo
+    
+    show_loading "Creating backup"
+    
+    files_to_backup=()
+    
+    if [ -f "/etc/zivpn/config.json" ]; then
+        files_to_backup+=("/etc/zivpn/config.json")
+        echo -e "   ${GREEN}✓${NC} config.json"
+    fi
+    
+    if [ -f "/etc/zivpn/users.json" ]; then
+        files_to_backup+=("/etc/zivpn/users.json")
+        echo -e "   ${GREEN}✓${NC} users.json"
+    fi
+    
+    if [ -f "/etc/zivpn/apikey" ]; then
+        files_to_backup+=("/etc/zivpn/apikey")
+        echo -e "   ${GREEN}✓${NC} apikey"
+    fi
+    
+    if [ -f "/etc/zivpn/domain" ]; then
+        files_to_backup+=("/etc/zivpn/domain")
+        echo -e "   ${GREEN}✓${NC} domain"
+    fi
+    
+    if [ -f "/etc/zivpn/bot-config.json" ]; then
+        files_to_backup+=("/etc/zivpn/bot-config.json")
+        echo -e "   ${GREEN}✓${NC} bot-config.json"
+    fi
+    
+    echo ""
+    
+    if [ ${#files_to_backup[@]} -eq 0 ]; then
+        echo -e "${RED}❌ No files to backup!${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    if zip -j "$backup_file" "${files_to_backup[@]}" 2>/dev/null; then
+        if [ -f "$backup_file" ] && [ -s "$backup_file" ]; then
+            backup_size=$(du -h "$backup_file" | cut -f1)
+            echo -e "\n${GREEN}✅ Backup created successfully!${NC}"
+            echo ""
+            echo -e "${CYAN}Backup Details:${NC}"
+            echo -e "  ID     : ${YELLOW}$backup_id${NC}"
+            echo -e "  File   : ${YELLOW}$backup_file${NC}"
+            echo -e "  Size   : ${YELLOW}$backup_size${NC}"
+            echo -e "  Files  : ${YELLOW}${#files_to_backup[@]}${NC} file(s)"
+            
+            echo ""
+            show_loading "Uploading to GitHub"
+            if upload_to_github "$backup_id" "$backup_file"; then
+                # Hapus backup lokal setelah upload berhasil
+                rm -f "$backup_file"
+                echo -e "   ${GREEN}✅ Local backup removed successfully!${NC}"
+            fi
+            
+            show_loading "Sending Telegram notification"
+            send_telegram_notification "$backup_id"
+        else
+            echo -e "\n${RED}❌ Failed to create backup file!${NC}"
+        fi
+    else
+        echo -e "\n${RED}❌ Failed to create backup!${NC}"
+    fi
+    
+    echo -e "\n${BLUE}─────────────────────────────────────────────────${NC}"
+    echo -e "${PURPLE}              Script By PeyxDev${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    
+    echo -e "\n${CYAN}Press Enter to continue...${NC}"
+    read -n 1 -s
+}
+
+Create_Backup

@@ -1,0 +1,204 @@
+#!/bin/bash
+
+# Color Definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BG_GREEN='\033[42;1m'
+BG_RED='\033[41;1m'
+NC='\033[0m'
+
+SPINNER=("⣷" "⣯" "⣟" "⡿" "⢿" "⣻" "⣽" "⣾")
+
+# Konfigurasi
+BOT_CONFIG="/etc/zivpn/bot-config.json"
+domain=$(cat /etc/zivpn/domain 2>/dev/null || echo "Tidak ada")
+
+display_header() {
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╔═══════════════════════════════════════╗${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       🤖 TELEGRAM BOT CONFIGURATION     ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       Notification Settings            ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╚═══════════════════════════════════════╝${BLUE}    │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo
+}
+
+show_loading() {
+    local text=$1
+    echo -ne "${CYAN}${text} ${NC}"
+    for i in {1..3}; do
+        for char in "${SPINNER[@]}"; do
+            echo -ne "\r${CYAN}${text} $char ${NC}"
+            sleep 0.1
+        done
+    done
+    echo -ne "\r${GREEN}${text} ✓ ${NC}"
+    echo
+}
+
+# Cek konfigurasi saat ini
+check_current_config() {
+    if [ -f "$BOT_CONFIG" ]; then
+        BOT_TOKEN=$(grep -o '"bot_token": "[^"]*"' "$BOT_CONFIG" 2>/dev/null | cut -d'"' -f4)
+        ADMIN_ID=$(grep -o '"admin_id": [0-9]*' "$BOT_CONFIG" 2>/dev/null | cut -d' ' -f2)
+        
+        echo -e "${GREEN}✓ Konfigurasi ditemukan${NC}"
+        echo ""
+        echo -e "${CYAN}╭─ CURRENT CONFIGURATION ${NC}"
+        echo -e "${CYAN}╰────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}Bot Token   : ${GREEN}${BOT_TOKEN:0:15}...${BOT_TOKEN: -10}${NC}"
+        echo -e "  ${WHITE}Admin ID    : ${GREEN}$ADMIN_ID${NC}"
+        echo -e "  ${WHITE}Domain      : ${GREEN}$domain${NC}"
+        echo ""
+        echo -e "${CYAN}╭─ NOTIFICATION STATUS ${NC}"
+        echo -e "${CYAN}╰────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}✅ Create User  : ${GREEN}ACTIVE${NC}"
+        echo -e "  ${WHITE}✅ Delete User  : ${GREEN}ACTIVE${NC}"
+        echo -e "  ${WHITE}✅ Renew User   : ${GREEN}ACTIVE${NC}"
+        echo -e "  ${WHITE}✅ Trial User   : ${GREEN}ACTIVE${NC}"
+        echo -e "  ${WHITE}✅ Backup       : ${GREEN}ACTIVE${NC}"
+        echo -e "  ${WHITE}✅ Restore      : ${GREEN}ACTIVE${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ Belum ada konfigurasi${NC}"
+        return 1
+    fi
+}
+
+# Test koneksi ke bot
+test_bot_connection() {
+    local bot_token=$1
+    local admin_id=$2
+    
+    echo ""
+    show_loading "Testing bot connection"
+    
+    local url="https://api.telegram.org/bot${bot_token}/getMe"
+    local response=$(curl -s "$url")
+    
+    if echo "$response" | grep -q '"ok":true'; then
+        echo -e "\n${GREEN}✅ Bot token valid!${NC}"
+        
+        # Test send message
+        local test_url="https://api.telegram.org/bot${bot_token}/sendMessage"
+        local test_msg="✅ *ZiVPN Bot Connected!*\n━━━━━━━━━━━━━━━━━━━━\n📢 *Notification Active*\n🏷️ *Domain:* $domain\n⏰ *Time:* $(date '+%Y-%m-%d %H:%M:%S')\n━━━━━━━━━━━━━━━━━━━━\n✅ Bot is ready to send notifications"
+        
+        curl -s -X POST "$test_url" \
+            -d "chat_id=${admin_id}" \
+            -d "text=${test_msg}" \
+            -d "parse_mode=Markdown" > /dev/null
+        
+        echo -e "${GREEN}✅ Test message sent to admin${NC}"
+        return 0
+    else
+        echo -e "\n${RED}❌ Invalid bot token!${NC}"
+        return 1
+    fi
+}
+
+# Simpan konfigurasi
+save_config() {
+    local bot_token=$1
+    local admin_id=$2
+    
+    cat > "$BOT_CONFIG" << EOF
+{
+    "bot_token": "$bot_token",
+    "admin_id": $admin_id,
+    "domain": "$domain",
+    "notifications": {
+        "create": true,
+        "delete": true,
+        "renew": true,
+        "trial": true,
+        "backup": true,
+        "restore": true
+    }
+}
+EOF
+    
+    chmod 600 "$BOT_CONFIG"
+}
+
+# Main function
+Configure_Bot() {
+    display_header
+    
+    echo -e "\n${BG_GREEN}${WHITE} TELEGRAM BOT CONFIGURATION ${NC}"
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    # Cek konfigurasi yang ada
+    check_current_config
+    
+    echo ""
+    echo -e "${CYAN}╭─ BOT SETUP ${NC}"
+    echo -e "${CYAN}╰────────────────────────────────────────────────${NC}"
+    echo -e "${WHITE}How to get Bot Token:${NC}"
+    echo -e "  1. Open Telegram and search @BotFather"
+    echo -e "  2. Send /newbot and follow instructions"
+    echo -e "  3. Copy the API token"
+    echo ""
+    echo -e "${WHITE}How to get Admin ID:${NC}"
+    echo -e "  1. Open Telegram and search @userinfobot"
+    echo -e "  2. Send /start"
+    echo -e "  3. Copy your ID"
+    echo ""
+    
+    read -p "   Do you want to configure bot? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo ""
+        read -p "   Press Enter to continue..."
+        return 0
+    fi
+    
+    echo ""
+    echo -ne "${PURPLE}➤ Bot Token: ${NC}"
+    read bot_token
+    
+    echo -ne "${PURPLE}➤ Admin ID: ${NC}"
+    read admin_id
+    
+    if [[ -z "$bot_token" ]] || [[ -z "$admin_id" ]]; then
+        echo -e "\n${RED}❌ Bot Token dan Admin ID harus diisi!${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    # Test koneksi
+    if test_bot_connection "$bot_token" "$admin_id"; then
+        show_loading "Saving configuration"
+        save_config "$bot_token" "$admin_id"
+        
+        clear
+        
+        echo -e "\n${GREEN}✅ Bot configuration saved successfully!${NC}"
+        echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+        echo -e "${CYAN}Bot Token    ${WHITE}: ${GREEN}${bot_token}${NC}"
+        echo -e "${CYAN}Admin ID     ${WHITE}: ${GREEN}$admin_id${NC}"
+        echo -e "${CYAN}Domain       ${WHITE}: ${GREEN}$domain${NC}"
+        echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "${GREEN}📢 All notifications are ACTIVE:${NC}"
+        echo -e "  • User Created"
+        echo -e "  • User Deleted"
+        echo -e "  • User Renewed"
+        echo -e "  • Trial User"
+        echo -e "  • Backup Created"
+        echo -e "  • Restore Completed"
+    else
+        echo -e "\n${RED}❌ Failed to configure bot. Please check your token and ID${NC}"
+    fi
+    
+    echo ""
+    read -p "   Press Enter to continue..."
+}
+
+# Run
+Configure_Bot

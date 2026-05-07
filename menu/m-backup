@@ -1,0 +1,141 @@
+#!/bin/bash
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+# Path file backup terpisah
+BACKUP_SCRIPT="/usr/local/bin/backup"
+
+# Fungsi untuk mengatur auto backup dengan cronjob
+set_auto_backup() {
+    local days=$1
+    
+    # Hapus SEMUA cronjob yang berhubungan dengan backup (lebih bersih)
+    crontab -l 2>/dev/null | grep -v "$BACKUP_SCRIPT" | crontab -
+    
+    # Atau cara alternatif dengan file temporari (lebih aman)
+    # crontab -l 2>/dev/null > /tmp/old_cron
+    # sed -i "/$BACKUP_SCRIPT/d" /tmp/old_cron 2>/dev/null
+    # crontab /tmp/old_cron
+    # rm -f /tmp/old_cron
+    
+    # Tambahkan cron baru
+    (crontab -l 2>/dev/null; echo "0 2 */$days * * /bin/bash $BACKUP_SCRIPT") | crontab -
+    
+    # Simpan konfigurasi
+    mkdir -p /etc/zivpn
+    echo "days=$days" > /etc/zivpn/auto_backup.conf
+    
+    echo -e "${GREEN}✓ Auto backup setiap $days hari telah diaktifkan${NC}"
+    echo -e "${CYAN}  Akan menjalankan: $BACKUP_SCRIPT${NC}"
+    echo -e "${CYAN}  Waktu: jam 02:00 pagi${NC}"
+    
+    # Tampilkan cron yang aktif
+    echo ""
+    echo -e "${CYAN}Current cronjob:${NC}"
+    crontab -l
+    echo ""
+    
+    echo -ne "${PURPLE}Press Enter to continue...${NC}"
+    read
+    menu_backup
+}
+
+# Fungsi untuk menonaktifkan auto backup
+disable_auto_backup() {
+    # Hapus semua cronjob yang mengandung BACKUP_SCRIPT
+    crontab -l 2>/dev/null | grep -v "$BACKUP_SCRIPT" | crontab -
+    
+    # Hapus file konfigurasi
+    rm -f /etc/zivpn/auto_backup.conf
+    
+    echo -e "${GREEN}✓ Auto backup telah dinonaktifkan${NC}"
+    echo ""
+    echo -ne "${PURPLE}Press Enter to continue...${NC}"
+    read
+    menu_backup
+}
+
+# Menu Auto Backup Settings
+auto_backup_menu() {
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╔═══════════════════════════════════════╗${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║       🤖 AUTO BACKUP SETTINGS         ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║          Premium Edition              ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╚═══════════════════════════════════════╝${BLUE}    │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    # Tampilkan status auto backup saat ini
+if crontab -l 2>/dev/null | grep -q "$BACKUP_SCRIPT"; then
+    echo -e " ${GREEN}● Status: ACTIVE${NC}"
+else
+    echo -e " ${RED}● Status: DISABLED${NC}"
+fi
+    
+    echo ""
+    echo -e "    ${CYAN}1)${WHITE} Every 1 Day"
+    echo -e "    ${CYAN}2)${WHITE} Every 3 Days"
+    echo -e "    ${CYAN}3)${WHITE} Every 7 Days"
+    echo -e "    ${CYAN}4)${WHITE} Every 2 Weeks (14 Days)"
+    echo -e "    ${CYAN}5)${WHITE} Every 30 Days"
+    echo -e "    ${CYAN}6)${WHITE} Disable Auto Backup"
+    echo -e "    ${CYAN}0)${WHITE} Back to Backup Menu"
+    echo ""
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo -ne "${PURPLE}➤ Select auto backup schedule : ${NC}"
+    read -r auto_option
+
+    case $auto_option in
+        1) set_auto_backup "1" ;;
+        2) set_auto_backup "3" ;;
+        3) set_auto_backup "7" ;;
+        4) set_auto_backup "14" ;;
+        5) set_auto_backup "30" ;;
+        6) disable_auto_backup ;;
+        0) menu_backup ;;
+        *) echo -e "${RED}✗ Invalid option!${NC}" ; sleep 1 ; auto_backup_menu ;;
+    esac
+}
+
+# Menu Backup & Restore Utama
+menu_backup() {
+    clear
+    echo -e "${BLUE}┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╔═══════════════════════════════════════╗${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║        💾 BACKUP & RESTORE            ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ║          Premium Edition              ║${BLUE}    │${NC}"
+    echo -e "${BLUE}│${YELLOW}    ╚═══════════════════════════════════════╝${BLUE}    │${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "    ${CYAN}1)${WHITE} Create Backup"
+    echo -e "    ${CYAN}2)${WHITE} Restore Backup"
+    echo -e "    ${CYAN}3)${WHITE} Set GitHub Token"
+    echo -e "    ${CYAN}4)${WHITE} Delete GitHub Token"
+    echo -e "    ${CYAN}5)${WHITE} Auto Backup Settings"
+    echo -e "    ${CYAN}0)${WHITE} Back to Main Menu"
+    echo ""
+    echo -e "${BLUE}─────────────────────────────────────────────────${NC}"
+    echo -ne "${PURPLE}➤ Select menu : ${NC}"
+    read -r menu_option
+
+    case $menu_option in
+        1) backup ;;
+        2) restore ;;
+        3) github-token ;;
+        4) del-token ;;
+        5) auto_backup_menu ;;
+        0) menu ;;
+        *) echo -e "${RED}✗ Invalid option!${NC}" ; sleep 1 ; menu_backup ;;
+    esac
+}
+
+# Panggil menu backup
+menu_backup
